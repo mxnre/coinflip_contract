@@ -41,7 +41,7 @@ contract CoinFlip is Ownable, ReentrancyGuard {
     IGembitesProxy public GembitesProxy;
 
     uint256 constant RTP = 98;
-    uint256 gameId;
+    uint256 public gameId;
 
     uint256 public betGBTS;
     uint256 public paidGBTS;
@@ -62,7 +62,7 @@ contract CoinFlip is Ownable, ReentrancyGuard {
      * @param _ULP Interface of ULP
      * @param _GBTS Interface of GBTS
      * @param _GembitesProxy Interface of GembitesProxy
-     * @param _gameID Id of game
+     * @param _gameID Id of Game
      */
     constructor(
         IUnifiedLiquidityPool _ULP,
