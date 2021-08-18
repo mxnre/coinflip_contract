@@ -1,0 +1,9 @@
+/build
+/node_modules
+.env
+secret.kovan.json
+secret.mumbai.json
+/public
+/contracts/Fake
+/contracts/UnifiedLiquidityPool.sol
+/contracts/RandomNumberConsumer.sol

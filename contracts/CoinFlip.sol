@@ -35,7 +35,7 @@ contract CoinFlip is Ownable, ReentrancyGuard {
 
     /// @notice Event emitted when gembites proxy set.
     event GembitesProxySet(address newProxyAddress);
-    
+
     IUnifiedLiquidityPool public ULP;
     IERC20 public GBTS;
     IGembitesProxy public GembitesProxy;
@@ -62,17 +62,18 @@ contract CoinFlip is Ownable, ReentrancyGuard {
      * @param _ULP Interface of ULP
      * @param _GBTS Interface of GBTS
      * @param _GembitesProxy Interface of GembitesProxy
+     * @param _gameID Id of game
      */
     constructor(
         IUnifiedLiquidityPool _ULP,
         IERC20 _GBTS,
-        uint256 _gameID,
-        IGembitesProxy _GembitesProxy
+        IGembitesProxy _GembitesProxy,
+        uint256 _gameID
     ) {
         ULP = _ULP;
         GBTS = _GBTS;
-        gameId = _gameID;
         GembitesProxy = _GembitesProxy;
+        gameId = _gameID;
 
         emit CoinFlipDeployed();
     }
@@ -126,8 +127,8 @@ contract CoinFlip is Ownable, ReentrancyGuard {
             betInfos[msg.sender].requestId
         );
 
-        uint256 gameNumber = uint256(
-            (keccak256(abi.encode(randomNumber, address(msg.sender), gameId))
+        uint256 gameNumber = (uint256(
+            keccak256(abi.encode(randomNumber, address(msg.sender), gameId))
         ) % 2) + 1;
 
         emit VerifiedGameNumber(randomNumber, gameNumber, gameId);
@@ -136,13 +137,9 @@ contract CoinFlip is Ownable, ReentrancyGuard {
 
         if (gameNumber == betInfo.number) {
             betInfos[msg.sender].number = 0;
-            ULP.sendPrize(
-                msg.sender,
-                potentialWinnings
-            );
+            ULP.sendPrize(msg.sender, betInfo.potentialWinnings);
 
-            paidGBTS += potentialWinnings;
-            
+            paidGBTS += betInfo.potentialWinnings;
 
             emit BetFinished(msg.sender, true);
         } else {
