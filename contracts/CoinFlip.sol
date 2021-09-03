@@ -8,6 +8,7 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
 import "./interfaces/IUnifiedLiquidityPool.sol";
 import "./interfaces/IGembitesProxy.sol";
+import "./interfaces/IRandomNumberGenerator.sol";
 
 /**
  * @title CoinFlip Contract
@@ -16,64 +17,75 @@ contract CoinFlip is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
     using Address for address;
 
-    /// @notice Event emitted only on construction.
-    event CoinFlipDeployed();
-
-    /// @notice Event emitted when player start the betting.
-    event BetStarted(
-        address indexed player,
-        uint256 number,
-        uint256 amount,
-        bytes32 batchID
-    );
-
-    /// @notice Event emitted when player finish the betting.
-    event BetFinished(address indexed player, bool won);
-
-    /// @notice Event emitted when game number generated.
-    event VerifiedGameNumber(uint256 vrf, uint256 gameNumber, uint256 gameId);
-
     /// @notice Event emitted when gembites proxy set.
     event GembitesProxySet(address newProxyAddress);
+
+    /// @notice Event emitted when contract is deployed.
+    event CoinFlipDeployed();
+
+    /// @notice Event emitted when bet is started.
+    event BetStarted(
+        address player,
+        uint256 multiplier,
+        uint256 number,
+        uint256 amount
+    );
+
+    /// @notice Event emitted when bet is finished.
+    event BetFinished(
+        address player,
+        uint256 paidAmount,
+        bool betResult, // 0: Draw, 1: Win, 2: Loss
+        BetInfo betInfo
+    );
 
     IUnifiedLiquidityPool public ULP;
     IERC20 public GBTS;
     IGembitesProxy public GembitesProxy;
-
-    uint256 constant RTP = 98;
-    uint256 public gameId;
+    IRandomNumberGenerator public RNG;
 
     uint256 public betGBTS;
     uint256 public paidGBTS;
 
-    uint256 public vrfCost = 10000; // 0.0001 Link
+    uint256 public gameId;
 
     struct BetInfo {
+        address player;
         uint256 number;
         uint256 amount;
-        uint256 potentialWinnings;
+        uint256 multiplier;
+        uint256 expectedWinAmount;
         bytes32 requestId;
+        uint256 gameNumber;
     }
 
-    mapping(address => BetInfo) private betInfos;
+    mapping(bytes32 => BetInfo) public requestToBet;
+
+    modifier onlyRNG() {
+        require(
+            msg.sender == address(RNG),
+            "CoinFlip: Caller is not the RandomNumberGenerator"
+        );
+        _;
+    }
 
     /**
      * @dev Constructor function
      * @param _ULP Interface of ULP
      * @param _GBTS Interface of GBTS
-     * @param _GembitesProxy Interface of GembitesProxy
-     * @param _gameID Id of Game
+     * @param _RNG Interface of RandomNumberGenerator
+     * @param _gameId Game Id
      */
     constructor(
         IUnifiedLiquidityPool _ULP,
         IERC20 _GBTS,
-        IGembitesProxy _GembitesProxy,
-        uint256 _gameID
+        IRandomNumberGenerator _RNG,
+        uint256 _gameId
     ) {
         ULP = _ULP;
         GBTS = _GBTS;
-        GembitesProxy = _GembitesProxy;
-        gameId = _gameID;
+        RNG = _RNG;
+        gameId = _gameId;
 
         emit CoinFlipDeployed();
     }
@@ -84,83 +96,67 @@ contract CoinFlip is Ownable, ReentrancyGuard {
      * @param _amount Amount of player betted.
      */
     function bet(uint256 _number, uint256 _amount) external {
-        require(betInfos[msg.sender].number == 0, "CoinFlip: Already betted");
+        uint256 expectedWinAmount;
+        uint256 multiplier = 196;
+        uint256 minBetAmount;
+        uint256 maxWinAmount;
+
+        minBetAmount = GembitesProxy.getMinBetAmount();
+        maxWinAmount = GBTS.balanceOf(address(ULP)) / 100;
+
         require(1 <= _number && _number <= 2, "CoinFlip: Number out of range");
-        require(
-            GBTS.balanceOf(msg.sender) >= _amount,
-            "CoinFlip: Caller has not enough balance"
-        );
 
-        uint256 winnings = (_amount * 196) / 100;
+        expectedWinAmount = (multiplier * _amount) / 1000;
 
         require(
-            checkBetAmount(winnings, _amount),
-            "CoinFlip: Bet amount is out of range"
+            _amount >= minBetAmount && expectedWinAmount <= maxWinAmount,
+            "CoinFlip: Expected paid amount is out of range"
         );
 
         GBTS.safeTransferFrom(msg.sender, address(ULP), _amount);
 
-        betInfos[msg.sender].number = _number;
-        betInfos[msg.sender].amount = _amount;
-        betInfos[msg.sender].potentialWinnings = winnings;
-        betInfos[msg.sender].requestId = ULP.requestRandomNumber();
-        betGBTS += _amount;
+        bytes32 requestId = RNG.requestRandomNumber();
 
-        emit BetStarted(
+        requestToBet[requestId] = BetInfo(
             msg.sender,
             _number,
             _amount,
-            betInfos[msg.sender].requestId
+            multiplier,
+            expectedWinAmount,
+            requestId,
+            0
         );
+
+        betGBTS += _amount;
+
+        emit BetStarted(msg.sender, multiplier, _number, _amount);
     }
 
     /**
-     * @dev External function to calculate betting win or lose.
+     * @dev External function for playing. This function can be called by only RandomNumberGenerator.
+     * @param _requestId Request Id
+     * @param _randomness Random Number
      */
-    function play() external nonReentrant {
-        require(
-            betInfos[msg.sender].number != 0,
-            "CoinFlip: Cannot play without betting"
-        );
+    function play(bytes32 _requestId, uint256 _randomness) external onlyRNG {
+        BetInfo storage betInfo = requestToBet[_requestId];
 
-        uint256 randomNumber = ULP.getVerifiedRandomNumber(
-            betInfos[msg.sender].requestId
-        );
+        address player = betInfo.player;
+        uint256 expectedWinAmount = betInfo.expectedWinAmount;
 
         uint256 gameNumber = (uint256(
-            keccak256(abi.encode(randomNumber, address(msg.sender), gameId))
+            keccak256(abi.encode(_randomness, player, gameId))
         ) % 2) + 1;
 
-        emit VerifiedGameNumber(randomNumber, gameNumber, gameId);
-
-        BetInfo storage betInfo = betInfos[msg.sender];
+        betInfo.gameNumber = gameNumber;
 
         if (gameNumber == betInfo.number) {
-            betInfos[msg.sender].number = 0;
-            ULP.sendPrize(msg.sender, betInfo.potentialWinnings);
+            ULP.sendPrize(msg.sender, expectedWinAmount);
+            paidGBTS += expectedWinAmount;
 
-            paidGBTS += betInfo.potentialWinnings;
-
-            emit BetFinished(msg.sender, true);
+            emit BetFinished(msg.sender, expectedWinAmount, true, betInfo);
         } else {
-            betInfos[msg.sender].number = 0;
-
-            emit BetFinished(msg.sender, false);
+            emit BetFinished(msg.sender, 0, false, betInfo);
         }
-    }
-
-    /**
-     * @dev Internal function to check current bet amount is enough to bet.
-     * @param _winnings Amount of GBTS user received if he wins.
-     * @param _betAmount Bet Amount
-     */
-    function checkBetAmount(uint256 _winnings, uint256 _betAmount)
-        internal
-        view
-        returns (bool)
-    {
-        return (GBTS.balanceOf(address(ULP)) / 100 >= _winnings &&
-            _betAmount >= GembitesProxy.getMinBetAmount());
     }
 
     /**
