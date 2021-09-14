@@ -35,7 +35,7 @@ contract CoinFlip is Ownable, ReentrancyGuard {
     event BetFinished(
         address player,
         uint256 paidAmount,
-        bool betResult, // 0: Draw, 1: Win, 2: Loss
+        bool betResult,
         BetInfo betInfo
     );
 
@@ -90,7 +90,7 @@ contract CoinFlip is Ownable, ReentrancyGuard {
      * @param _number Number of player set
      * @param _amount Amount of player betted.
      */
-    function bet(uint256 _number, uint256 _amount) external {
+    function bet(uint256 _number, uint256 _amount) external nonReentrant {
         uint256 expectedWinAmount;
         uint256 multiplier = 196;
         uint256 minBetAmount;
@@ -101,7 +101,7 @@ contract CoinFlip is Ownable, ReentrancyGuard {
 
         require(1 <= _number && _number <= 2, "CoinFlip: Number out of range");
 
-        expectedWinAmount = (multiplier * _amount) / 1000;
+        expectedWinAmount = (multiplier * _amount) / 100;
 
         require(
             _amount >= minBetAmount && expectedWinAmount <= maxWinAmount,
