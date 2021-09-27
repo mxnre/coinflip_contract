@@ -136,16 +136,18 @@ contract CoinFlip is Ownable, ReentrancyGuard {
     function play(bytes32 _requestId, uint256 _randomness) external onlyRNG {
         BetInfo storage betInfo = requestToBet[_requestId];
 
+        address player = betInfo.player;
         uint256 expectedWinAmount = betInfo.expectedWinAmount;
+
         betInfo.gameNumber = (_randomness % 2) + 1;
 
         if (betInfo.gameNumber == betInfo.number) {
-            ULP.sendPrize(msg.sender, expectedWinAmount);
+            ULP.sendPrize(player, expectedWinAmount);
             paidGBTS += expectedWinAmount;
 
-            emit BetFinished(msg.sender, expectedWinAmount, true, betInfo);
+            emit BetFinished(player, expectedWinAmount, true, betInfo);
         } else {
-            emit BetFinished(msg.sender, 0, false, betInfo);
+            emit BetFinished(player, 0, false, betInfo);
         }
     }
 
